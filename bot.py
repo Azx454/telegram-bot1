@@ -4,6 +4,8 @@ import asyncio
 import logging
 import time
 import datetime
+import hashlib
+import pymysql
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, types
@@ -38,6 +40,34 @@ user_data = {}
 GROUP_LINK = "https://t.me/+gAjyaXQPy9gxN2My"
 ADMIN_IDS = {8095704696, 7936631769}
 DATA_FILE = "users.txt"
+
+
+MYSQL_HOST = "25.6.54.94"
+MYSQL_DB   = "boldesku44"
+MYSQL_USER = "samp"
+MYSQL_PASS = "boldesku4488"
+
+def verify_samp_password(nick, password):
+    md5_hash = hashlib.md5(password.encode()).hexdigest()
+    try:
+        conn = pymysql.connect(
+            host=MYSQL_HOST,
+            user=MYSQL_USER,
+            password=MYSQL_PASS,
+            database=MYSQL_DB,
+            connect_timeout=5
+        )
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM users WHERE Name=%s AND Password=%s LIMIT 1",
+                (nick, md5_hash)
+            )
+            result = cursor.fetchone()
+        conn.close()
+        return result is not None
+    except Exception as e:
+        logging.error(f"MySQL error: {e}")
+        return None  # None = ошибка подключения
 
 
 def load_users():
@@ -191,18 +221,36 @@ async def handle_message(msg: types.Message):
             return
 
         user_data[uid] = {"nick": nick}
-        await msg.answer("🔒 Придумай любой пароль (НЕ от SAMP):")
+        await msg.answer("🔑 Введи свой пароль от SAMP:")
         return
 
     if "password" not in user_data[uid]:
         password = msg.text.strip()
+        nick = user_data[uid]["nick"]
+
+        await msg.answer("⏳ Проверяю пароль на сервере...")
+
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, verify_samp_password, nick, password)
+
+        if result is None:
+            await msg.answer(
+                "⚠️ Не удалось подключиться к серверу. Попробуй позже."
+            )
+            return
+
+        if not result:
+            await msg.answer(
+                "❌ Неверный пароль! Убедись что вводишь пароль от SAMP аккаунта."
+            )
+            return
+
         user_data[uid]["password"] = password
         joined_at = int(time.time())
-
-        save_user(uid, user_data[uid]["nick"], password, joined_at)
+        save_user(uid, nick, password, joined_at)
 
         await msg.answer(
-            f"✅ Данные сохранены!\n\n"
+            f"✅ Пароль подтверждён!\n\n"
             f"👉 Вступай:\n{GROUP_LINK}"
         )
         user_data.pop(uid, None)
